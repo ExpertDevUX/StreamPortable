@@ -1,13 +1,12 @@
 #!/bin/bash
 
 # ============================================================
-# SSL and Streaming Protocol Configuration Script
+# Streaming Protocol Configuration Script
 # ============================================================
 # This script:
-# 1. Installs SSL certificates via Certbot
-# 2. Configures HLS (HTTP Live Streaming) protocol
-# 3. Configures DASH (Dynamic Adaptive Streaming over HTTP) protocol
-# 4. Integrates with existing RTMP server
+# 1. Configures HLS (HTTP Live Streaming) protocol
+# 2. Configures DASH (Dynamic Adaptive Streaming over HTTP) protocol
+# 3. Integrates with existing RTMP server
 # ============================================================
 
 # Text formatting
@@ -105,22 +104,22 @@ install_dependencies() {
     case "$OS" in
         *Ubuntu*|*Debian*)
             apt-get update
-            apt-get install -y nginx ffmpeg certbot python3-certbot-nginx
+            apt-get install -y nginx ffmpeg
             ;;
         *CentOS*|*RHEL*|*Fedora*)
             yum -y install epel-release
-            yum -y install nginx ffmpeg certbot python3-certbot-nginx
+            yum -y install nginx ffmpeg
             ;;
         *SUSE*)
-            zypper install -y nginx ffmpeg certbot python-certbot-nginx
+            zypper install -y nginx ffmpeg
             ;;
         *)
-            log_error "Unsupported Linux distribution. Please install Nginx, FFmpeg, and Certbot manually."
+            log_error "Unsupported Linux distribution. Please install Nginx and FFmpeg manually."
             exit 1
             ;;
     esac
     
-    if command_exists nginx && command_exists ffmpeg && command_exists certbot; then
+    if command_exists nginx && command_exists ffmpeg; then
         log_success "Dependencies installed successfully."
     else
         log_error "Failed to install dependencies."
@@ -146,55 +145,7 @@ verify_rtmp_module() {
     fi
 }
 
-# Function to install SSL certificate
-install_ssl() {
-    log_info "Installing SSL certificate..."
-    
-    # Ask for domain name
-    echo -e "${BOLD}Enter your domain name (e.g., stream.example.com):${NC}"
-    read domain_name
-    
-    if [ -z "$domain_name" ]; then
-        log_error "Domain name cannot be empty."
-        exit 1
-    fi
-    
-    # Check if the domain resolves to this server's IP
-    server_ip=$(curl -s ifconfig.me)
-    domain_ip=$(dig +short "$domain_name")
-    
-    if [ -z "$domain_ip" ]; then
-        log_warning "Could not resolve IP for $domain_name. Make sure DNS is correctly configured."
-        read -p "Do you want to continue anyway? (y/n) " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            log_error "SSL installation aborted."
-            exit 1
-        fi
-    elif [ "$domain_ip" != "$server_ip" ]; then
-        log_warning "Domain $domain_name resolves to $domain_ip but this server's IP is $server_ip."
-        read -p "Do you want to continue anyway? (y/n) " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            log_error "SSL installation aborted."
-            exit 1
-        fi
-    fi
-    
-    # Install SSL certificate
-    log_info "Running Certbot for $domain_name..."
-    certbot --nginx -d "$domain_name" --non-interactive --agree-tos --email webmaster@"$domain_name" --redirect
-    
-    if [ $? -eq 0 ]; then
-        log_success "SSL certificate installed successfully for $domain_name."
-    else
-        log_error "Failed to install SSL certificate."
-        exit 1
-    fi
-    
-    # Save domain for later use
-    echo "$domain_name" > /tmp/stream_domain.txt
-}
+# This function has been moved to ssl_config.sh
 
 # Function to configure HLS
 configure_hls() {
@@ -401,29 +352,7 @@ test_and_restart() {
     fi
 }
 
-# Function to configure automatic SSL renewal
-configure_ssl_renewal() {
-    log_info "Setting up automatic SSL renewal..."
-    
-    # Creating renewal script
-    cat > /etc/cron.weekly/certbot-renew << 'EOF'
-#!/bin/bash
-certbot renew --quiet --no-self-upgrade
-
-# Restart Nginx after renewal
-if command -v systemctl >/dev/null 2>&1; then
-    systemctl restart nginx
-elif command -v service >/dev/null 2>&1; then
-    service nginx restart
-else
-    /etc/init.d/nginx restart
-fi
-EOF
-
-    chmod +x /etc/cron.weekly/certbot-renew
-    
-    log_success "Automatic SSL renewal configured."
-}
+# This function has been moved to ssl_config.sh
 
 # Function to verify the setup
 verify_setup() {
@@ -469,16 +398,16 @@ verify_setup() {
 main() {
     clear
     echo -e "${BOLD}======================================================${NC}"
-    echo -e "${BOLD}      SSL and Streaming Protocol Configuration Script      ${NC}"
+    echo -e "${BOLD}      Streaming Protocol Configuration Script      ${NC}"
     echo -e "${BOLD}======================================================${NC}"
     echo
     echo -e "This script will:"
-    echo -e "  1. Install SSL certificates via Certbot"
-    echo -e "  2. Configure HLS (HTTP Live Streaming) protocol"
-    echo -e "  3. Configure DASH (Dynamic Adaptive Streaming over HTTP) protocol"
-    echo -e "  4. Integrate with your existing RTMP server"
+    echo -e "  1. Configure HLS (HTTP Live Streaming) protocol"
+    echo -e "  2. Configure DASH (Dynamic Adaptive Streaming over HTTP) protocol"
+    echo -e "  3. Integrate with your existing RTMP server"
     echo
-    echo -e "${YELLOW}Note: This script assumes you have a working RTMP server with Nginx.${NC}"
+    echo -e "${YELLOW}Note: This script assumes you have a working RTMP server with Nginx and SSL certificates installed.${NC}"
+    echo -e "${YELLOW}Run ssl_config.sh first if you haven't installed SSL certificates yet.${NC}"
     echo
     
     read -p "Do you want to continue? (y/n) " -n 1 -r
@@ -486,6 +415,24 @@ main() {
     if [[ ! $REPLY =~ ^[Yy]$ ]]; then
         log_info "Script aborted by user."
         exit 0
+    fi
+    
+    # Check if domain file exists (created by ssl_config.sh)
+    if [ ! -f "/tmp/stream_domain.txt" ]; then
+        echo -e "${BOLD}Enter your domain name (e.g., stream.example.com):${NC}"
+        read domain_name
+        
+        if [ -z "$domain_name" ]; then
+            log_error "Domain name cannot be empty."
+            exit 1
+        fi
+        
+        # Save domain for later use
+        echo "$domain_name" > /tmp/stream_domain.txt
+        log_info "Domain name saved: $domain_name"
+    else
+        domain_name=$(cat /tmp/stream_domain.txt)
+        log_info "Using domain name from previous SSL configuration: $domain_name"
     fi
     
     # Initialize log file
@@ -496,21 +443,19 @@ main() {
     detect_distro
     install_dependencies
     verify_rtmp_module
-    install_ssl
     configure_hls
     configure_dash
     configure_http_server
     test_and_restart
-    configure_ssl_renewal
     verify_setup
+    # Note: SSL renewal is handled by ssl_config.sh
     
     echo
     echo -e "${GREEN}======================================================${NC}"
-    echo -e "${GREEN}      Installation completed successfully!      ${NC}"
+    echo -e "${GREEN}      Streaming Configuration completed successfully!      ${NC}"
     echo -e "${GREEN}======================================================${NC}"
     echo
     echo -e "Your streaming server is now configured with:"
-    echo -e "  - SSL certificates (with automatic renewal)"
     echo -e "  - HLS streaming protocol"
     echo -e "  - DASH streaming protocol"
     echo
